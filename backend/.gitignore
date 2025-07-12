@@ -4,3 +4,6 @@ venv
 
 __pycache__/
 .__pycache__
+
+# Documentation and summaries
+COMMIT_SUMMARY.md
