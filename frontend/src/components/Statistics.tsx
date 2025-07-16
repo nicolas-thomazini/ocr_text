@@ -64,7 +64,7 @@ const Statistics: React.FC = () => {
         },
         {
             title: 'Confiança Média',
-            value: `${Math.round(stats.average_confidence * 100)}%`,
+            value: `${stats.average_confidence?.toFixed(2) ?? 'N/A'}%`,
             icon: TrendingUp,
             color: 'text-purple-600',
             bgColor: 'bg-purple-50',
