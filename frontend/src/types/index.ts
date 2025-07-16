@@ -2,14 +2,15 @@
 export interface Document {
     id: string;
     filename: string;
-    original_text: string;
+    original_text?: string;
     corrected_text?: string;
-    confidence_score: number;
-    status: 'processing' | 'completed' | 'error';
-    created_at: string;
-    updated_at: string;
-    file_size: number;
-    file_type: string;
+    confidence_score?: number;
+    status: 'processing' | 'completed' | 'error' | 'uploaded';
+    created_at?: string;
+    updated_at?: string;
+    file_size?: number;
+    file_type?: string;
+    upload_date?: string;
 }
 
 // AI Correction types
