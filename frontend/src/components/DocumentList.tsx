@@ -1,5 +1,5 @@
 import React, { useState } from 'react';
-import { File, Eye, Trash2, Download, Calendar, Clock } from 'lucide-react';
+import { File, Eye, Trash2, Calendar, Clock } from 'lucide-react';
 import { useDocuments, useDeleteDocument } from '../hooks/useDocuments';
 import type { Document } from '../types';
 
@@ -130,12 +130,12 @@ const DocumentList: React.FC<DocumentListProps> = ({ onDocumentSelect, className
                                     <div className="flex items-center space-x-4 text-xs text-gray-500">
                                         <span className="flex items-center space-x-1">
                                             <Calendar className="h-3 w-3" />
-                                            <span>{formatDate(document.created_at)}</span>
+                                            <span>{formatDate(document.upload_date ?? "")}</span>
                                         </span>
-                                        <span>{formatFileSize(document.file_size)}</span>
+                                        <span>{formatFileSize(document.file_size ?? 0)}</span>
                                         <span className="flex items-center space-x-1">
                                             <Clock className="h-3 w-3" />
-                                            <span>Confiança: {Math.round(document.confidence_score * 100)}%</span>
+                                            <span>Confiança: {typeof document.confidence_score === 'number' ? Math.round(document.confidence_score) : 'N/A'}%</span>
                                         </span>
                                     </div>
                                 </div>
