@@ -2,6 +2,29 @@
 
 Intelligent AI system for analyzing and improving ancient Italian documents, specifically developed for genealogical research.
 
+## 🐳 Docker Quickstart
+
+1. Build and start all services:
+   ```bash
+   docker-compose up --build
+   ```
+
+2. Access the services:
+   - Frontend: http://localhost:3000
+   - Backend (API): http://localhost:8000/docs
+   - Database: localhost:5432 (user: postgres, password: postgres)
+
+3. To stop:
+   ```bash
+   docker-compose down
+   ```
+
+---
+
+For more details, see the README files in each service directory.
+
+---
+
 ## 🎯 Purpose
 
 This project uses **advanced Artificial Intelligence** to extract and improve the reading of ancient Italian documents, with special focus on genealogical documents. The AI learns continuously from human corrections, becoming increasingly accurate in interpreting historical texts.
@@ -54,8 +77,7 @@ git clone <repository-url>
 cd family_search_OCR
 
 # Run with Docker Compose
-cd backend
-docker-compose up -d
+docker-compose up --build
 
 # Access the API
 curl http://localhost:8000
@@ -136,4 +158,4 @@ This project is under active development. Contributions are welcome!
 
 ## 📝 License
 
-Project developed for genealogical research and preservation of historical documents. 
+Project developed for genealogical research and preservation of historical documents.

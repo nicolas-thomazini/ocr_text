@@ -3,16 +3,18 @@ import { Upload, FileText, Brain, Settings } from 'lucide-react';
 import FileUpload from '../components/FileUpload';
 import DocumentList from '../components/DocumentList';
 import Statistics from '../components/Statistics';
+import DocumentDashboard from '../components/DocumentDashboard';
 import type { Document } from '../types';
 
 const Dashboard: React.FC = () => {
-    const [activeTab, setActiveTab] = useState<'overview' | 'documents' | 'upload'>('overview');
+    const [activeTab, setActiveTab] = useState<'overview' | 'documents' | 'upload' | 'dashboard'>('overview');
     const [selectedDocument, setSelectedDocument] = useState<Document | null>(null);
 
     const tabs = [
         { id: 'overview', name: 'Visão Geral', icon: FileText },
         { id: 'documents', name: 'Documentos', icon: FileText },
         { id: 'upload', name: 'Upload', icon: Upload },
+        { id: 'dashboard', name: 'Dashboard', icon: Brain },
     ];
 
     const handleDocumentSelect = (document: Document) => {
@@ -119,6 +121,15 @@ const Dashboard: React.FC = () => {
                         <div className="max-w-2xl">
                             <FileUpload onUploadComplete={handleUploadComplete} />
                         </div>
+                    </div>
+                )}
+
+                {activeTab === 'dashboard' && (
+                    <div>
+                        <h2 className="text-lg font-medium text-gray-900 mb-6">
+                            Dashboard de Documentos (Visualização e Gerenciamento)
+                        </h2>
+                        <DocumentDashboard />
                     </div>
                 )}
             </main>

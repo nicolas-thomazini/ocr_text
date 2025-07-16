@@ -1,0 +1,17 @@
+# This project uses Node.js and npm for dependency management.
+# This file is for reference only. Use `npm install` to manage dependencies.
+
+react
+react-dom
+vite
+typescript
+tailwindcss
+postcss
+autoprefixer
+@tanstack/react-query
+axios
+react-hook-form
+react-dropzone
+lucide-react
+@headlessui/react
+clsx 

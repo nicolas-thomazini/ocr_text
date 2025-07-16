@@ -1,5 +1,5 @@
 import axios from 'axios';
-import type { AxiosInstance, AxiosResponse } from 'axios';
+import type { AxiosInstance } from 'axios';
 import type {
     Document,
     AICorrection,
@@ -150,6 +150,11 @@ class ApiService {
                 }
             },
         });
+        return response.data;
+    }
+
+    async processDocument(id: string): Promise<any> {
+        const response = await this.api.post(`/documents/${id}/process`);
         return response.data;
     }
 }

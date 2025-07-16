@@ -1,6 +1,5 @@
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import apiService from '../services/api';
-import type { Document, PaginatedResponse } from '../types';
 
 export const useDocuments = (page = 1, limit = 10) => {
     return useQuery({
@@ -39,6 +38,16 @@ export const useDeleteDocument = () => {
         mutationFn: (id: string) => apiService.deleteDocument(id),
         onSuccess: () => {
             // Invalidate and refetch documents
+            queryClient.invalidateQueries({ queryKey: ['documents'] });
+        },
+    });
+};
+
+export const useProcessDocument = () => {
+    const queryClient = useQueryClient();
+    return useMutation({
+        mutationFn: (id: string) => apiService.processDocument(id),
+        onSuccess: () => {
             queryClient.invalidateQueries({ queryKey: ['documents'] });
         },
     });

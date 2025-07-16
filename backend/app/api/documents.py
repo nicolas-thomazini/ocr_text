@@ -93,17 +93,42 @@ async def process_document(
         db.commit()
         raise HTTPException(status_code=500, detail=f"Erro no processamento: {str(e)}")
 
-@router.get("/", response_model=List[DocumentSchema])
+@router.get("/", response_model=None)
 async def list_documents(
-    skip: int = 0,
-    limit: int = 100,
+    page: int = 1,
+    limit: int = 10,
     db: Session = Depends(get_db)
 ):
     """
-    Lista todos os documentos
+    Lista todos os documentos (paginado)
     """
-    documents = db.query(Document).offset(skip).limit(limit).all()
-    return documents
+    total = db.query(Document).count()
+    documents = db.query(Document).offset((page - 1) * limit).limit(limit).all()
+    total_pages = (total + limit - 1) // limit if limit else 1
+    # Serializar documentos manualmente para garantir compatibilidade
+    items = []
+    for doc in documents:
+        # Buscar o OCRResult mais recente (se existir)
+        ocr_result = None
+        if hasattr(doc, 'ocr_results') and doc.ocr_results:
+            ocr_result = sorted(doc.ocr_results, key=lambda x: x.processing_date or datetime.min, reverse=True)[0]
+        items.append({
+            'id': str(doc.id),
+            'filename': doc.filename,
+            'status': doc.status.lower() if doc.status else None,
+            'original_path': doc.original_path,
+            'processed_path': getattr(doc, 'processed_path', None),
+            'upload_date': doc.upload_date.isoformat() if doc.upload_date else None,
+            'confidence_score': ocr_result.confidence_score if ocr_result else None,
+            'original_text': ocr_result.text_extracted if ocr_result else None,
+        })
+    return {
+        'items': items,
+        'total': total,
+        'page': page,
+        'per_page': limit,
+        'total_pages': total_pages
+    }
 
 @router.get("/{document_id}", response_model=DocumentSchema)
 async def get_document(

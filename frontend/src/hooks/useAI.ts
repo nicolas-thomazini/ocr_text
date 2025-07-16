@@ -1,6 +1,5 @@
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import apiService from '../services/api';
-import type { AICorrection, AIModel } from '../types';
 
 export const useAICorrections = (documentId: string) => {
     return useQuery({
@@ -16,7 +15,7 @@ export const useCreateAICorrection = () => {
 
     return useMutation({
         mutationFn: (documentId: string) => apiService.createAICorrection(documentId),
-        onSuccess: (data, documentId) => {
+        onSuccess: (_, documentId) => {
             // Invalidate and refetch AI corrections for this document
             queryClient.invalidateQueries({ queryKey: ['ai-corrections', documentId] });
         },

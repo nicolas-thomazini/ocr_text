@@ -6,6 +6,7 @@ import os
 from typing import Tuple, Dict, Any
 from app.config import settings
 import logging
+from skimage import exposure, transform
 
 logger = logging.getLogger(__name__)
 
@@ -14,45 +15,72 @@ class OCRService:
         # Configurar Tesseract
         pytesseract.pytesseract.tesseract_cmd = settings.TESSERACT_CMD
         
-    def preprocess_image(self, image_path: str) -> np.ndarray:
+    def preprocess_image(self, image_path: str, save_debug: bool = True) -> str:
         """
-        Pré-processa a imagem para melhorar a qualidade do OCR
+        Pré-processa a imagem para melhorar a qualidade do OCR e salva o resultado se desejado.
+        Retorna o caminho da imagem pré-processada.
         """
         # Ler imagem
         image = cv2.imread(image_path)
         if image is None:
             raise ValueError(f"Não foi possível ler a imagem: {image_path}")
-        
-        # Converter para escala de cinza
+        # 1. Converter para escala de cinza
         gray = cv2.cvtColor(image, cv2.COLOR_BGR2GRAY)
-        
-        # Aplicar filtros para melhorar qualidade
-        # 1. Redução de ruído
-        denoised = cv2.fastNlMeansDenoising(gray)
-        
-        # 2. Equalização de histograma para melhorar contraste
+        # 2. Remover ruído
+        denoised = cv2.fastNlMeansDenoising(gray, h=15)
+        # 3. Ajustar contraste (CLAHE)
         clahe = cv2.createCLAHE(clipLimit=2.0, tileGridSize=(8,8))
-        enhanced = clahe.apply(denoised)
-        
-        # 3. Binarização adaptativa
+        contrast = clahe.apply(denoised)
+        # 4. Binarização adaptativa
         binary = cv2.adaptiveThreshold(
-            enhanced, 255, cv2.ADAPTIVE_THRESH_GAUSSIAN_C, 
-            cv2.THRESH_BINARY, 11, 2
+            contrast, 255, cv2.ADAPTIVE_THRESH_GAUSSIAN_C, 
+            cv2.THRESH_BINARY, 31, 15
         )
-        
-        # 4. Morfologia para remover ruído
-        kernel = np.ones((1,1), np.uint8)
-        cleaned = cv2.morphologyEx(binary, cv2.MORPH_CLOSE, kernel)
-        
-        return cleaned
+        # 5. Sharpening (nitidez)
+        kernel = np.array([[0, -1, 0], [-1, 5,-1], [0, -1, 0]])
+        sharp = cv2.filter2D(binary, -1, kernel)
+        # 6. Redimensionar para altura mínima (ex: 1000px)
+        min_height = 1000
+        if sharp.shape[0] < min_height:
+            scale = min_height / sharp.shape[0]
+            sharp = cv2.resize(sharp, None, fx=scale, fy=scale, interpolation=cv2.INTER_CUBIC)
+        # 7. Deskew (correção de inclinação)
+        from skimage.transform import rotate
+        from skimage.filters import threshold_otsu
+        import math
+        def compute_skew(image):
+            edges = cv2.Canny(image, 50, 150)
+            lines = cv2.HoughLines(edges, 1, np.pi / 180, 200)
+            if lines is None:
+                return 0
+            angles = []
+            for line in lines:
+                for rho, theta in line:
+                    angle = (theta * 180 / np.pi) - 90
+                    angles.append(angle)
+            if len(angles) == 0:
+                return 0
+            median_angle = np.median(angles)
+            return median_angle
+        skew_angle = compute_skew(sharp)
+        if abs(skew_angle) > 0.5:
+            sharp = rotate(sharp, -skew_angle, resize=False, mode='edge', preserve_range=True).astype(np.uint8)
+        # 8. Salvar imagem pré-processada
+        pre_dir = os.path.join(os.path.dirname(image_path), 'preprocessed')
+        os.makedirs(pre_dir, exist_ok=True)
+        preprocessed_path = os.path.join(pre_dir, os.path.basename(image_path))
+        if save_debug:
+            cv2.imwrite(preprocessed_path, sharp)
+        return preprocessed_path
     
     def extract_text(self, image_path: str) -> Dict[str, Any]:
         """
         Extrai texto da imagem usando OCR
         """
         try:
-            # Pré-processar imagem
-            processed_image = self.preprocess_image(image_path)
+            # Pré-processar imagem e salvar
+            preprocessed_path = self.preprocess_image(image_path, save_debug=True)
+            processed_image = cv2.imread(preprocessed_path)
             
             # Configurações do Tesseract para italiano antigo
             custom_config = r'--oem 3 --psm 6 -l ita'
@@ -83,7 +111,8 @@ class OCRService:
                 'text': cleaned_text,
                 'confidence': avg_confidence,
                 'raw_text': text,
-                'word_confidences': data['conf']
+                'word_confidences': data['conf'],
+                'preprocessed_path': preprocessed_path
             }
             
         except Exception as e:
