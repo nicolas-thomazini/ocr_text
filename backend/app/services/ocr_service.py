@@ -7,6 +7,8 @@ from typing import Tuple, Dict, Any
 from app.config import settings
 import logging
 from skimage import exposure, transform
+import hashlib
+import time
 
 logger = logging.getLogger(__name__)
 
@@ -15,39 +17,51 @@ class OCRService:
         # Configurar Tesseract
         pytesseract.pytesseract.tesseract_cmd = settings.TESSERACT_CMD
         
-    def preprocess_image(self, image_path: str, save_debug: bool = True) -> str:
+    def preprocess_image(self, image_path: str, save_debug: bool = True, force_reprocess: bool = False) -> str:
         """
         Pré-processa a imagem para melhorar a qualidade do OCR e salva o resultado se desejado.
         Retorna o caminho da imagem pré-processada.
         """
+        # Gerar hash único baseado no timestamp para evitar cache
+        timestamp = str(time.time())
+        file_hash = hashlib.md5(f"{image_path}_{timestamp}".encode()).hexdigest()[:8]
+        
         # Ler imagem
         image = cv2.imread(image_path)
         if image is None:
             raise ValueError(f"Não foi possível ler a imagem: {image_path}")
+        
         # 1. Converter para escala de cinza
         gray = cv2.cvtColor(image, cv2.COLOR_BGR2GRAY)
+        
         # 2. Remover ruído
         denoised = cv2.fastNlMeansDenoising(gray, h=15)
+        
         # 3. Ajustar contraste (CLAHE)
         clahe = cv2.createCLAHE(clipLimit=2.0, tileGridSize=(8,8))
         contrast = clahe.apply(denoised)
+        
         # 4. Binarização adaptativa
         binary = cv2.adaptiveThreshold(
             contrast, 255, cv2.ADAPTIVE_THRESH_GAUSSIAN_C, 
             cv2.THRESH_BINARY, 31, 15
         )
+        
         # 5. Sharpening (nitidez)
         kernel = np.array([[0, -1, 0], [-1, 5,-1], [0, -1, 0]])
         sharp = cv2.filter2D(binary, -1, kernel)
+        
         # 6. Redimensionar para altura mínima (ex: 1000px)
         min_height = 1000
         if sharp.shape[0] < min_height:
             scale = min_height / sharp.shape[0]
             sharp = cv2.resize(sharp, None, fx=scale, fy=scale, interpolation=cv2.INTER_CUBIC)
+        
         # 7. Deskew (correção de inclinação)
         from skimage.transform import rotate
         from skimage.filters import threshold_otsu
         import math
+        
         def compute_skew(image):
             edges = cv2.Canny(image, 50, 150)
             lines = cv2.HoughLines(edges, 1, np.pi / 180, 200)
@@ -62,25 +76,38 @@ class OCRService:
                 return 0
             median_angle = np.median(angles)
             return median_angle
+        
         skew_angle = compute_skew(sharp)
         if abs(skew_angle) > 0.5:
             sharp = rotate(sharp, -skew_angle, resize=False, mode='edge', preserve_range=True).astype(np.uint8)
-        # 8. Salvar imagem pré-processada
+        
+        # 8. Salvar imagem pré-processada com nome único
         pre_dir = os.path.join(os.path.dirname(image_path), 'preprocessed')
         os.makedirs(pre_dir, exist_ok=True)
-        preprocessed_path = os.path.join(pre_dir, os.path.basename(image_path))
-        if save_debug:
+        
+        # Usar nome único para evitar cache
+        base_name = os.path.splitext(os.path.basename(image_path))[0]
+        preprocessed_path = os.path.join(pre_dir, f"{base_name}_{file_hash}.jpg")
+        
+        if save_debug or force_reprocess:
             cv2.imwrite(preprocessed_path, sharp)
+            logger.info(f"Imagem pré-processada salva: {preprocessed_path}")
+        
         return preprocessed_path
     
-    def extract_text(self, image_path: str) -> Dict[str, Any]:
+    def extract_text(self, image_path: str, force_reprocess: bool = True) -> Dict[str, Any]:
         """
         Extrai texto da imagem usando OCR
         """
         try:
-            # Pré-processar imagem e salvar
-            preprocessed_path = self.preprocess_image(image_path, save_debug=True)
+            logger.info(f"Iniciando processamento OCR para: {image_path}")
+            
+            # Pré-processar imagem e salvar (sempre forçar reprocessamento)
+            preprocessed_path = self.preprocess_image(image_path, save_debug=True, force_reprocess=force_reprocess)
             processed_image = cv2.imread(preprocessed_path)
+            
+            if processed_image is None:
+                raise ValueError(f"Não foi possível ler a imagem pré-processada: {preprocessed_path}")
             
             # Configurações do Tesseract para italiano antigo
             custom_config = r'--oem 3 --psm 6 -l ita'
@@ -106,6 +133,11 @@ class OCRService:
             
             # Limpar texto
             cleaned_text = self.clean_text(text)
+            
+            logger.info(f"OCR concluído com confiança: {avg_confidence:.2f}")
+            
+            # Não limpar cache durante o processamento para evitar interferência
+            # O cache será limpo pelo endpoint após salvar no banco
             
             return {
                 'text': cleaned_text,
@@ -163,6 +195,39 @@ class OCRService:
                 })
         
         return results
+    
+    def clear_cache(self, keep_recent: bool = True):
+        """
+        Limpa o cache de imagens pré-processadas
+        keep_recent: se True, mantém os arquivos mais recentes (últimos 5 minutos)
+        """
+        pre_dir = os.path.join(settings.UPLOAD_DIR, 'preprocessed')
+        if not os.path.exists(pre_dir):
+            return
+        
+        current_time = time.time()
+        files_removed = 0
+        
+        for file in os.listdir(pre_dir):
+            file_path = os.path.join(pre_dir, file)
+            try:
+                if os.path.isfile(file_path):
+                    # Se keep_recent=True, manter arquivos criados nos últimos 5 minutos
+                    if keep_recent:
+                        file_age = current_time - os.path.getctime(file_path)
+                        if file_age < 300:  # 5 minutos
+                            continue
+                    
+                    os.remove(file_path)
+                    files_removed += 1
+                    logger.debug(f"Cache removido: {file_path}")
+            except Exception as e:
+                logger.warning(f"Erro ao remover arquivo de cache: {file_path} - {str(e)}")
+        
+        if files_removed > 0:
+            logger.info(f"Cache limpo: {files_removed} arquivos removidos")
+        else:
+            logger.debug("Cache já estava limpo")
 
 # Instância global do serviço
 ocr_service = OCRService() 
