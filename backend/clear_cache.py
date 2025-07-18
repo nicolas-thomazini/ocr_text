@@ -7,7 +7,6 @@ import os
 import shutil
 import logging
 
-# Configurar logging
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
 
@@ -16,7 +15,6 @@ def clear_cache():
     Limpa o cache de processamento
     """
     try:
-        # Limpar diretório de imagens pré-processadas
         preprocessed_dir = "./uploads/preprocessed"
         if os.path.exists(preprocessed_dir):
             for file in os.listdir(preprocessed_dir):
@@ -32,7 +30,6 @@ def clear_cache():
         else:
             logger.info("Diretório de cache não existe")
         
-        # Limpar diretório de modelos (opcional)
         models_dir = "./models"
         if os.path.exists(models_dir):
             logger.info("Cache de modelos encontrado (não removido por segurança)")
