@@ -1,9 +1,17 @@
+# virtual environment
 venv/
 venv
 .venv
 
+# pycache
 __pycache__/
 .__pycache__
 
+# models
 /models
+
+# uploads
 /uploads
+
+# env parameters
+.env
