@@ -4,36 +4,50 @@ import logging
 from fastapi import FastAPI, HTTPException
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.staticfiles import StaticFiles
+from starlette.middleware.base import BaseHTTPMiddleware
 from contextlib import asynccontextmanager
+from starlette.responses import Response
 
 from app.config import settings
 from app.database import engine, Base, get_db
 from app.api import documents, corrections, ai
+from app.services.ocr_service import ocr_service
 from sqlalchemy.orm import Session
 from fastapi import Depends
 from datetime import datetime, timedelta
 
-# Configurar logging
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
 
-# Criar diretório para armazenar imagens pré-processadas
+class CORBMiddleware(BaseHTTPMiddleware):
+    async def dispatch(self, request, call_next):
+        response = await call_next(request)
+        response.headers["Access-Control-Allow-Origin"] = "*"
+        response.headers["Access-Control-Allow-Methods"] = "GET, POST, PUT, DELETE, OPTIONS"
+        response.headers["Access-Control-Allow-Headers"] = "*"
+        response.headers["Access-Control-Expose-Headers"] = "*"
+        response.headers["X-Content-Type-Options"] = "nosniff"
+        return response
+
 os.makedirs("./uploads/preprocessed", exist_ok=True)
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
-    # Startup
     logger.info("Iniciando aplicação Family Search OCR")
     
-    # Criar tabelas se não existirem
     Base.metadata.create_all(bind=engine)
+    
+    # clear cache
+    try:
+        ocr_service.clear_cache(keep_recent=False)  # Limpar tudo na inicialização
+        logger.info("Cache limpo na inicialização")
+    except Exception as e:
+        logger.warning(f"Erro ao limpar cache na inicialização: {str(e)}")
     
     yield
     
-    # Shutdown
     logger.info("Encerrando aplicação Family Search OCR")
 
-# Criar aplicação
 app = FastAPI(
     title="Family Search OCR - AI System",
     description="Sistema de IA para análise de documentos antigos em italiano",
@@ -41,21 +55,22 @@ app = FastAPI(
     lifespan=lifespan
 )
 
-# Configurar CORS
+app.add_middleware(CORBMiddleware)
+
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=["*"],  # Em produção, especificar domínios específicos
+    allow_origins=["http://localhost:3000", "http://127.0.0.1", "http://localhost:80", "http://127.0.0.1"],
     allow_credentials=True,
-    allow_methods=["*"],
+    allow_methods=["GET", "POST", "PUT", "DELETE", "OPTIONS"],
     allow_headers=["*"],
+    expose_headers=["*"],
+    max_age=3600,
 )
 
-# Incluir rotas
 app.include_router(documents.router)
 app.include_router(corrections.router)
 app.include_router(ai.router)
 
-# Após criar a aplicação FastAPI (após app = FastAPI(...))
 app.mount(
     "/preprocessed-images",
     StaticFiles(directory="./uploads/preprocessed"),
@@ -94,30 +109,29 @@ async def get_statistics(db: Session = Depends(get_db)):
     try:
         from app.database import Document, OCRResult, Correction
         
-        # Total de documentos
+        # total documents
         total_documents = db.query(Document).count()
         
-        # Documentos processados (com status completed)
+        # processed documents
         processed_documents = db.query(Document).filter(Document.status == "completed").count()
         
-        # Documentos de hoje
+        # documents today
         today = datetime.utcnow().date()
         documents_today = db.query(Document).filter(
             Document.upload_date >= today
         ).count()
         
-        # Confiança média dos OCRs
+        # average confidence
         ocr_results = db.query(OCRResult).all()
         if ocr_results:
             average_confidence = sum(result.confidence_score for result in ocr_results) / len(ocr_results)
         else:
             average_confidence = 0.0
         
-        # Total de correções
+        # total corrections
         total_corrections = db.query(Correction).count()
         
-        # Precisão da IA (placeholder - pode ser melhorado)
-        ai_accuracy = 0.85  # Valor padrão, pode ser calculado baseado no histórico
+        ai_accuracy = 0.85  
         
         return {
             "total_documents": total_documents,
