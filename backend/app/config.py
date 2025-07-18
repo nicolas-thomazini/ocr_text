@@ -19,6 +19,7 @@ class Settings(BaseSettings):
     # OCR
     TESSERACT_CMD: str = "/usr/bin/tesseract"
     OCR_LANG: str = "ita"  # Italian
+    TESSDATA_PREFIX: str = "/usr/share/tesseract-ocr/5/tessdata"
     
     # File Upload
     UPLOAD_DIR: str = "./uploads"
@@ -29,11 +30,21 @@ class Settings(BaseSettings):
     LEARNING_RATE: float = 2e-5
     EPOCHS: int = 3
     
+    # Processing Configuration
+    ENABLE_PREPROCESSING: bool = True
+    SAVE_PREPROCESSED_IMAGES: bool = True
+    CLEAR_CACHE_ON_STARTUP: bool = True
+    MAX_CONCURRENT_PROCESSES: int = 2
+    
+    # Debug Configuration
+    DEBUG: bool = True
+    LOG_LEVEL: str = "INFO"
+    
     class Config:
         env_file = ".env"
+        extra = "ignore"  
 
 settings = Settings()
 
-# Create necessary directories
 os.makedirs(settings.MODEL_CACHE_DIR, exist_ok=True)
 os.makedirs(settings.UPLOAD_DIR, exist_ok=True) 
