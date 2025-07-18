@@ -4,6 +4,8 @@ from typing import List
 import os
 import shutil
 from datetime import datetime
+import logging
+import asyncio
 
 from app.database import get_db, Document, OCRResult
 from app.models.schemas import Document as DocumentSchema, OCRResponse
@@ -11,6 +13,7 @@ from app.services.ocr_service import ocr_service
 from app.services.ai_service import ai_service
 from app.config import settings
 
+logger = logging.getLogger(__name__)
 router = APIRouter(prefix="/documents", tags=["documents"])
 
 @router.post("/upload", response_model=DocumentSchema)
@@ -21,15 +24,12 @@ async def upload_document(
     """
     Faz upload de um documento para processamento
     """
-    # Validar tipo de arquivo
     if not file.content_type.startswith('image/'):
         raise HTTPException(status_code=400, detail="Apenas arquivos de imagem são aceitos")
     
-    # Validar tamanho
     if file.size > settings.MAX_FILE_SIZE:
         raise HTTPException(status_code=400, detail="Arquivo muito grande")
     
-    # Salvar arquivo
     timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
     filename = f"{timestamp}_{file.filename}"
     file_path = os.path.join(settings.UPLOAD_DIR, filename)
@@ -37,7 +37,6 @@ async def upload_document(
     with open(file_path, "wb") as buffer:
         shutil.copyfileobj(file.file, buffer)
     
-    # Criar registro no banco
     document = Document(
         filename=file.filename,
         original_path=file_path,
@@ -47,30 +46,37 @@ async def upload_document(
     db.commit()
     db.refresh(document)
     
+    logger.info(f"Documento enviado: {document.id} - {filename}")
     return document
 
 @router.post("/{document_id}/process", response_model=OCRResponse)
 async def process_document(
     document_id: int,
+    force_reprocess: bool = True,
     db: Session = Depends(get_db)
 ):
     """
     Processa um documento com OCR
     """
-    # Buscar documento
     document = db.query(Document).filter(Document.id == document_id).first()
     if not document:
         raise HTTPException(status_code=404, detail="Documento não encontrado")
     
     try:
-        # Atualizar status
+        logger.info(f"Iniciando processamento do documento {document_id}")
+        
+        if not os.path.exists(document.original_path):
+            raise HTTPException(status_code=404, detail="Arquivo original não encontrado")
+        
         document.status = "processing"
         db.commit()
         
-        # Processar OCR
-        ocr_result = ocr_service.extract_text(document.original_path)
+        ocr_result = ocr_service.extract_text(document.original_path, force_reprocess=force_reprocess)
         
-        # Salvar resultado no banco
+        existing_results = db.query(OCRResult).filter(OCRResult.document_id == document.id).all()
+        for result in existing_results:
+            db.delete(result)
+        
         db_result = OCRResult(
             document_id=document.id,
             text_extracted=ocr_result['text'],
@@ -78,9 +84,19 @@ async def process_document(
         )
         db.add(db_result)
         
-        # Atualizar status do documento
         document.status = "completed"
+        document.processed_path = ocr_result.get('preprocessed_path')
         db.commit()
+        
+        await asyncio.sleep(0.1)
+        
+        logger.info(f"Processamento concluído para documento {document_id} com confiança {ocr_result['confidence']:.2f}")
+        
+        try:
+            ocr_service.clear_cache(keep_recent=False)
+            logger.info("Cache limpo após processamento bem-sucedido")
+        except Exception as e:
+            logger.warning(f"Erro ao limpar cache após processamento: {str(e)}")
         
         return OCRResponse(
             text=ocr_result['text'],
@@ -89,9 +105,20 @@ async def process_document(
         )
         
     except Exception as e:
+        logger.error(f"Erro no processamento do documento {document_id}: {str(e)}")
         document.status = "error"
         db.commit()
         raise HTTPException(status_code=500, detail=f"Erro no processamento: {str(e)}")
+
+@router.post("/{document_id}/reprocess", response_model=OCRResponse)
+async def reprocess_document(
+    document_id: int,
+    db: Session = Depends(get_db)
+):
+    """
+    Força o reprocessamento de um documento
+    """
+    return await process_document(document_id, force_reprocess=True, db=db)
 
 @router.get("/", response_model=None)
 async def list_documents(
@@ -105,12 +132,11 @@ async def list_documents(
     total = db.query(Document).count()
     documents = db.query(Document).offset((page - 1) * limit).limit(limit).all()
     total_pages = (total + limit - 1) // limit if limit else 1
-    # Serializar documentos manualmente para garantir compatibilidade
     items = []
+
     for doc in documents:
-        # Buscar o OCRResult mais recente (se existir)
         ocr_result = None
-        if hasattr(doc, 'ocr_results') and doc.ocr_results:
+        if doc.ocr_results:
             ocr_result = sorted(doc.ocr_results, key=lambda x: x.processing_date or datetime.min, reverse=True)[0]
         items.append({
             'id': str(doc.id),
@@ -155,12 +181,29 @@ async def delete_document(
     if not document:
         raise HTTPException(status_code=404, detail="Documento não encontrado")
     
-    # Remover arquivo
     if os.path.exists(document.original_path):
         os.remove(document.original_path)
+        logger.info(f"Arquivo original removido: {document.original_path}")
     
-    # Remover do banco
+    if document.processed_path and os.path.exists(document.processed_path):
+        os.remove(document.processed_path)
+        logger.info(f"Arquivo processado removido: {document.processed_path}")
+    
     db.delete(document)
     db.commit()
     
-    return {"message": "Documento removido com sucesso"} 
+    logger.info(f"Documento {document_id} removido com sucesso")
+    return {"message": "Documento removido com sucesso"}
+
+@router.post("/clear-cache")
+async def clear_processing_cache():
+    """
+    Limpa o cache de processamento
+    """
+    try:
+        ocr_service.clear_cache()
+        logger.info("Cache de processamento limpo com sucesso")
+        return {"message": "Cache limpo com sucesso"}
+    except Exception as e:
+        logger.error(f"Erro ao limpar cache: {str(e)}")
+        raise HTTPException(status_code=500, detail=f"Erro ao limpar cache: {str(e)}") 
